@@ -50,32 +50,39 @@ struct mem_arena_t;
 typedef struct mem_arena_t mem_arena_t;
 
 /* api */
-mem_arena_t* mem_arena_create   (size_t size_in_bytes);
-void*        mem_arena_push    (mem_arena_t* arena, size_t size); /* push onto arena, committing if needed  */
+mem_arena_t* mem_arena_create  (size_t        size_in_bytes);
+void*        mem_arena_push    (mem_arena_t*  arena, size_t size); /* push onto arena, committing if needed  */
 
-void*        mem_arena_place   (mem_arena_t* arena, size_t size); /* push onto arena w/o committing memory  */
-mem_arena_t* mem_arena_subarena(mem_arena_t* base,  size_t size); /* pushes on an arena w/o committing memory */
+void*        mem_arena_place   (mem_arena_t*  arena, size_t size); /* push onto arena w/o committing memory  */
+mem_arena_t* mem_arena_subarena(mem_arena_t*  base,  size_t size); /* pushes on an arena w/o committing memory */
 
-void         mem_arena_pop_to  (mem_arena_t* arena, void* buf);
-void         mem_arena_pop_by  (mem_arena_t* arena, size_t bytes);
+void         mem_arena_pop_to  (mem_arena_t*  arena, char* buf);
+void         mem_arena_pop_by  (mem_arena_t*  arena, size_t bytes);
 
-void         mem_arena_free    (mem_arena_t* arena);
+void         mem_arena_clear   (mem_arena_t*  arena);
+void         mem_arena_destroy (mem_arena_t** arena);
 
 /* helper */
 mem_arena_t* mem_arena_default ();
-size_t       mem_arena_get_pos (mem_arena_t* arena);
 #define ARENA_PUSH_ARRAY(arena, type, count) (type*) mem_arena_push((arena), sizeof(type)*(count))
 #define ARENA_PUSH_STRUCT(arena, type)       ARENA_PUSH_ARRAY((arena), type, 1)
-#define ARENA_BUFFER(arena, pos)             ((void*) ((((unsigned char*) arena) + sizeof(mem_arena_t)) + pos))
+
+//#define ARENA_BUFFER(arena, pos)             ((void*) ((((char*) arena) + sizeof(mem_arena_t)) + pos))
 
 /* TODO scratch arenas */
 
 #ifdef MEM_ARENA_IMPLEMENTATION
+typedef struct arena_region_header_t { size_t size; /* size of allocated region*/ } arena_region_header_t; /* unused */
+
 struct mem_arena_t
 {
-    size_t pos;
-    size_t cap;
-    size_t commit_pos;
+    char* pos;
+    char* end;
+    char* commit_pos;
+
+    /* size_t pos; */
+    /* size_t cap; */
+    /* size_t commit_pos; */
 
     #ifdef BUILD_DEBUG
     int depth; /* base arena has depth 0 */
@@ -96,9 +103,12 @@ mem_arena_t* mem_arena_create(size_t size_in_bytes) {
 
     MEM_ARENA_ASSERT(arena);
 
-    arena->pos        = 0;
-    arena->cap        = size_in_bytes;
-    arena->commit_pos = 0;
+    /* arena->pos        = 0; */
+    /* arena->cap        = size_in_bytes; */
+    /* arena->commit_pos = 0; */
+    arena->pos        = (char*) arena + sizeof(mem_arena_t);
+    arena->end        = arena->pos + size_in_bytes;
+    arena->commit_pos = arena->pos;
 
     #ifdef BUILD_DEBUG
     arena->depth         = 0;
@@ -110,14 +120,14 @@ mem_arena_t* mem_arena_create(size_t size_in_bytes) {
 mem_arena_t* mem_arena_subarena(mem_arena_t* base, size_t size) {
     /* push on an arena w/o committing memory (when MEM_ARENA_USE_RESERVE_AND_COMMIT_STRATEGY) */
     mem_arena_t* subarena = NULL;
-    if ((base->pos + size) <= base->cap)
+    if ((base->pos + (size + sizeof(mem_arena_t)) <= base->end))
     {
-        subarena         = (mem_arena_t*) ARENA_BUFFER(base, base->pos);
-        base->pos        = base->pos + size;
-        base->commit_pos = base->pos + size; // NOTE we advance the commit_pos
-                                             // here even though we don't commit
-                                             // the memory - maybe we should
-                                             // rename this member
+        //subarena       = (mem_arena_t*) ARENA_BUFFER(base, base->pos);
+        subarena         = (mem_arena_t*) base->pos;
+        base->pos        = base->pos + (size + sizeof(mem_arena_t));
+        /* NOTE we advance the commit_pos here even though we don't commit the
+         * memory - maybe we should rename this member */
+        base->commit_pos = base->pos + (size + sizeof(mem_arena_t));
     }
     else { MEM_ARENA_ASSERT(0 && "Couldn't fit subarena\n"); }
 
@@ -126,9 +136,9 @@ mem_arena_t* mem_arena_subarena(mem_arena_t* base, size_t size) {
       MEM_ARENA_OS_COMMIT((void*) subarena, sizeof(mem_arena_t)); // TODO handle error
     #endif
 
-    subarena->pos         = 0;
-    subarena->cap         = size;
-    subarena->commit_pos  = 0; // TODO should we set it to 0 or to sizeof(mem_arena_t)
+    subarena->pos         = (char*) subarena + sizeof(mem_arena_t);
+    subarena->end         = subarena->pos + size;
+    subarena->commit_pos  = subarena->pos;
 
     #ifdef BUILD_DEBUG
     subarena->depth         = base->depth + 1;
@@ -138,18 +148,19 @@ mem_arena_t* mem_arena_subarena(mem_arena_t* base, size_t size) {
     return subarena;
 }
 void* mem_arena_push(mem_arena_t* arena, size_t size) {
-    void* buf   = NULL;
-    size_t push_to = arena->pos + size;
-    if (push_to <= arena->cap)
+    void* buf     = NULL;
+    char* push_to = arena->pos + size;
+    if (push_to <= arena->end)
     {
-        buf = ARENA_BUFFER(arena, arena->pos);
+        //buf = ARENA_BUFFER(arena, arena->pos);
+        buf = arena->pos;
         arena->pos = push_to;
 
         /* handle committing */
-        if (arena->commit_pos <= arena->pos)
+        if (arena->pos >= arena->commit_pos)
         {
             #ifdef MEM_ARENA_USE_RESERVE_AND_COMMIT_STRATEGY
-              int committed = MEM_ARENA_OS_COMMIT(ARENA_BUFFER(arena, arena->commit_pos), size);
+              int committed = MEM_ARENA_OS_COMMIT(arena->commit_pos, size);
               MEM_ARENA_ASSERT(committed);
             #endif
 
@@ -164,41 +175,47 @@ void* mem_arena_push(mem_arena_t* arena, size_t size) {
     MEM_ARENA_ASSERT(buf);
     return buf;
 }
-void mem_arena_pop_to(mem_arena_t* arena, void* buf) {
-    MEM_ARENA_ASSERT((uintptr_t) arena <= (uintptr_t) buf);
-    MEM_ARENA_ASSERT(((uintptr_t) arena + arena->cap) >= (uintptr_t) buf);
+void mem_arena_pop_to(mem_arena_t* arena, char* buf) {
+    MEM_ARENA_ASSERT((char*) (arena + sizeof(mem_arena_t)) <= buf);
+    MEM_ARENA_ASSERT(arena->end >= buf);
 
-    size_t new_pos =  (unsigned char*) buf - (unsigned char*) ARENA_BUFFER(arena, 0);
-    size_t diff    = arena->pos - new_pos;
+    //size_t new_pos =  (unsigned char*) buf - (unsigned char*) ARENA_BUFFER(arena, 0);
+    size_t diff = arena->pos - buf;
     if (diff > 0)
     {
-        arena->pos = new_pos;
-        memset(ARENA_BUFFER(arena, arena->pos), 0, diff);
+        arena->pos  = buf;
+        //arena->pos = new_pos;
+        memset(arena->pos, 0, diff);
 
         /* TODO maybe handle decommitting here */
     }
 }
 void mem_arena_pop_by(mem_arena_t* arena, size_t bytes) {
-    MEM_ARENA_ASSERT((arena->pos - bytes) >= 0);
-    mem_arena_pop_to(arena, ARENA_BUFFER(arena, arena->pos - bytes));
+    MEM_ARENA_ASSERT((arena->pos - bytes) >= ((char*) arena + sizeof(mem_arena_t)));
+    mem_arena_pop_to(arena, arena->pos - bytes);
 }
-void mem_arena_free(mem_arena_t* arena) {
-    size_t cap = arena->cap;
+void mem_arena_clear(mem_arena_t*  arena) {
+    /* NOTE: cannot be called with scratch arenas */
+    arena->pos = (char*) arena;
+
+    /* TODO maybe handle decommitting here */
+}
+void mem_arena_destroy(mem_arena_t** arena) {
+    size_t cap = (*arena)->end - (char*) (*arena);
 
     #ifdef MEM_ARENA_USE_RESERVE_AND_COMMIT_STRATEGY
-      MEM_ARENA_OS_DECOMMIT((void*) arena, cap);
-      MEM_ARENA_OS_RELEASE((void*) arena, cap);
+      MEM_ARENA_OS_DECOMMIT((void*) *arena, cap);
+      MEM_ARENA_OS_RELEASE((void*) *arena, cap);
     #else
-      MEM_ARENA_OS_FREE((void*) arena);
+      MEM_ARENA_OS_FREE((void*) *arena);
     #endif
+
+    *arena = NULL;
 }
 
 #define ARENA_DEFAULT_RESERVE_SIZE (4 * 1024 * 1024)
 mem_arena_t* mem_arena_default() {
     mem_arena_t* default_arena = mem_arena_create(ARENA_DEFAULT_RESERVE_SIZE);
     return default_arena;
-}
-size_t mem_arena_get_pos(mem_arena_t* arena) {
-    return arena->pos;
 }
 #endif // MEM_ARENA_IMPLEMENTATION

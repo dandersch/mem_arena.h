@@ -1,3 +1,7 @@
+//#define NEXT_ALIGN_POW2(x,align) (((x) + (align) - 1) & ~((align) - 1))
+//#define PREV_ALIGN_POW2(x,align) ((x) & ~((align) - 1))
+//#define ALIGN_TO_NEXT_PAGE(val) NEXT_ALIGN_POW2((uintptr_t) val, 4096)
+//#define ALIGN_TO_PREV_PAGE(val) PREV_ALIGN_POW2((uintptr_t) val, 4096)
 //#if defined(_WIN32)
 //  #include <windows.h>
 //  #define MEM_ARENA_OS_RESERVE(size)      VirtualAlloc(NULL, size, MEM_RESERVE, PAGE_READWRITE)
@@ -7,8 +11,7 @@
 //#elif defined(__linux__)
 //  #include <sys/mman.h> /* for mmmap, mprotect, madvise */
 //  #define MEM_ARENA_OS_RESERVE(size)      mmap(NULL, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-//  /* TODO mprotect fails if addr is not aligned to pageboundary and if length (size) is not multiple of pagesize (given by sysconf()). */
-//  #define MEM_ARENA_OS_COMMIT(ptr,size)   mprotect(ptr, size, PROT_READ | PROT_WRITE);
+//  #define MEM_ARENA_OS_COMMIT(ptr,size)   (mprotect((void*)ALIGN_TO_PREV_PAGE(ptr), (size_t)((ALIGN_TO_NEXT_PAGE(ptr + size) - ALIGN_TO_PREV_PAGE(ptr))) + 4096, PROT_READ | PROT_WRITE) == 0)
 //  #define MEM_ARENA_OS_DECOMMIT(ptr,size) mprotect(ptr, size, PROT_NONE);
 //  #define MEM_ARENA_OS_RELEASE(ptr,size)  munmap(ptr, size)
 //#endif

@@ -86,7 +86,7 @@ int main(int argc, char** argv)
         assert(decommitted);
         // for (u32 i = 0; i < buf_size_committed; i++) { buf[0] = 'b'; } // should cause SEGV
         mem_release(buf,  buf_size_committed);
-        mem_free(buf_2,   buf_size_committed);
+        mem_free(buf_2);
     }
 
     /* TEST ARENAS */

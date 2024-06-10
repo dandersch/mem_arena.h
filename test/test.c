@@ -1,14 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
 //#if defined(_WIN32)
 //  #include <windows.h>
 //  #define MEM_ARENA_OS_RESERVE(size)      VirtualAlloc(NULL, size, MEM_RESERVE, PAGE_READWRITE)
@@ -100,7 +89,7 @@ int main(int argc, char** argv)
 
     /* TEST ARENAS */
     {
-        mem_arena_t* arena = mem_arena_reserve(MEGABYTES(1));
+        mem_arena_t* arena = mem_arena_create(MEGABYTES(1));
         unsigned char* arena_buf     = (unsigned char*) mem_arena_push(arena, KILOBYTES(4));
         assert(arena);
         assert(arena_buf);
@@ -134,7 +123,7 @@ int main(int argc, char** argv)
 
     /* TEST ARENA RESERVING & COMMITTING */
     {
-        mem_arena_t* arena   = mem_arena_reserve(KILOBYTES(32));
+        mem_arena_t* arena   = mem_arena_create(KILOBYTES(32));
         unsigned char* arena_buf_1      = (unsigned char*) mem_arena_push(arena, KILOBYTES(4));
         assert(arena_buf_1);
         for (size_t i = 0; i < KILOBYTES(4); i++) { assert(!arena_buf_1[i]); }
@@ -146,7 +135,7 @@ int main(int argc, char** argv)
 
     /* TEST SUBARENAS */
     {
-        mem_arena_t* base_arena     = mem_arena_reserve(RES_MEM_APPLICATION);
+        mem_arena_t* base_arena     = mem_arena_create(RES_MEM_APPLICATION);
         mem_arena_t* platform_arena = mem_arena_subarena(base_arena, RES_MEM_PLATFORM);
         assert(platform_arena);
         mem_arena_t* renderer_arena = mem_arena_subarena(base_arena, RES_MEM_RENDERER);

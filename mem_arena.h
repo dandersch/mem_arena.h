@@ -14,6 +14,11 @@ typedef struct mem_arena_t mem_arena_t;
   #define MEM_ARENA_OS_FREE(ptr)   free(ptr)
 #endif
 
+#ifndef MEM_ARENA_ASSERT
+    #include <assert.h>
+    #define MEM_ARENA_ASSERT(expr) assert(expr)
+#endif
+
 /* NOTE: if one macro related to commiting/reserving memory is defined, we
    assume the arena is supposed to reserve and commit and not use malloc() */
 #if defined(MEM_ARENA_OS_COMMIT) || defined(MEM_ARENA_OS_RESERVE) || defined(MEM_ARENA_OS_DECOMMIT) || defined(MEM_ARENA_OS_RELEASE)
@@ -47,7 +52,7 @@ size_t       mem_arena_get_pos (mem_arena_t* arena);
 #define ARENA_PUSH_STRUCT(arena, type)       ARENA_PUSH_ARRAY((arena), type, 1)
 #define ARENA_BUFFER(arena, pos)             ((void*) ((((unsigned char*) arena) + sizeof(mem_arena_t)) + pos))
 
-#define ARENA_DEFAULT_RESERVE_SIZE MEGABYTES(4)
+#define ARENA_DEFAULT_RESERVE_SIZE (4 * 1024 * 1024)
 
 /* TODO scratch arenas */
 
@@ -95,10 +100,7 @@ mem_arena_t* mem_arena_subarena(mem_arena_t* base, size_t size) {
                                              // the memory - maybe we should
                                              // rename this member
     }
-    else
-    {
-        UNREACHABLE("Couldn't fit subarena\n");
-    }
+    else { MEM_ARENA_ASSERT(0 && "Couldn't fit subarena\n"); }
 
     /* commit enough to write the subarena metadata */
     MEM_ARENA_OS_COMMIT((void*) subarena, sizeof(mem_arena_t)); // TODO handle error
@@ -124,8 +126,8 @@ void* mem_arena_push(mem_arena_t* arena, size_t size) {
         /* handle committing */
         if (arena->commit_pos <= arena->pos)
         {
-            b32 committed = MEM_ARENA_OS_COMMIT(ARENA_BUFFER(arena, arena->commit_pos), size);
-            ASSERT(committed);
+            int committed = MEM_ARENA_OS_COMMIT(ARENA_BUFFER(arena, arena->commit_pos), size);
+            MEM_ARENA_ASSERT(committed);
             arena->commit_pos += size;
 
             #ifdef BUILD_DEBUG
@@ -133,16 +135,13 @@ void* mem_arena_push(mem_arena_t* arena, size_t size) {
             #endif
         }
     }
-    else
-    {
-        UNREACHABLE("Overstepped capacity of arena");
-    }
-    ASSERT(buf);
+    else { MEM_ARENA_ASSERT(0 && "Overstepped capacity of arena"); }
+    MEM_ARENA_ASSERT(buf);
     return buf;
 }
 void mem_arena_pop_to(mem_arena_t* arena, void* buf) {
-    ASSERT((uintptr_t) arena <= (uintptr_t) buf);
-    ASSERT(((uintptr_t) arena + arena->cap) >= (uintptr_t) buf);
+    MEM_ARENA_ASSERT((uintptr_t) arena <= (uintptr_t) buf);
+    MEM_ARENA_ASSERT(((uintptr_t) arena + arena->cap) >= (uintptr_t) buf);
     size_t new_pos =  (unsigned char*) buf - (unsigned char*) ARENA_BUFFER(arena, 0);
     size_t diff    = arena->pos - new_pos;
     if (diff > 0)
@@ -154,7 +153,7 @@ void mem_arena_pop_to(mem_arena_t* arena, void* buf) {
     }
 }
 void mem_arena_pop_by(mem_arena_t* arena, size_t bytes) {
-    ASSERT((arena->pos - bytes) >= 0);
+    MEM_ARENA_ASSERT((arena->pos - bytes) >= 0);
     mem_arena_pop_to(arena, ARENA_BUFFER(arena, arena->pos - bytes));
 }
 void mem_arena_free(mem_arena_t* arena) {
